@@ -15,9 +15,26 @@ void trace(char *s)
 
 void facecheck_recv(void *pclient)
 {
+	CAccepter *client = reinterpret_cast<CAccepter *>(pclient);
+	int err = 0;
 	while (1)
 	{
-
+		memset(client->m_buffer_recv, 0, sizeof client->m_buffer_recv);
+		err = recv(client->m_sock, client->m_buffer_recv, sizeof client->m_buffer_recv, NULL);
+		if (SOCKET_ERROR == err)
+		{
+			err = GetLastError();
+			if (10035 == err)
+			{
+				Sleep(1000);
+				continue;
+			}
+		}
+		else if (err > 0)
+		{
+			trace(client->m_buffer_recv);
+		}
+		continue;
 	}
 
 }
@@ -40,8 +57,8 @@ int main( int argc, char *argv[])
 		return 1;
 	}
 
-	WSAEVENT    eventArray[WSA_MAXIMUM_WAIT_EVENTS];
-	SOCKET      *sockArray[WSA_MAXIMUM_WAIT_EVENTS];
+	WSAEVENT    eventArray[WSA_MAXIMUM_WAIT_EVENTS] = {0};
+	SOCKET      *sockArray[WSA_MAXIMUM_WAIT_EVENTS] = {0};
 	int nEventTotal = 0;
 
 	// 创建套接字
@@ -133,9 +150,10 @@ int main( int argc, char *argv[])
 							trace("太多连接!");
 							continue;
 						}
+						trace("客户端连接");
 						pclient->m_sock = accept(sock_server, (sockaddr FAR*)&(pclient->m_addr), NULL);
 						WSAEVENT event = ::WSACreateEvent();
-						::WSAEventSelect(pclient->m_sock, event, FD_READ | FD_CLOSE | FD_WRITE);
+						::WSAEventSelect(pclient->m_sock, event, FD_CLOSE | FD_WRITE);
 						// 添加到表中  
 						eventArray[nEventTotal] = event;
 						sockArray[nEventTotal] = &pclient->m_sock;
@@ -144,13 +162,14 @@ int main( int argc, char *argv[])
 
 						// 启动读写线程
 						_beginthread(	facecheck_recv, NULL, (void *)pclient);
-						_beginthread(	facecheck_send, NULL, (void *)pclient);
+						// _beginthread(	facecheck_send, NULL, (void *)pclient);
 					}
 				}
 				else if (event.lNetworkEvents & FD_CLOSE)        // 处理FD_CLOSE通知消息  
 				{
 					if (event.iErrorCode[FD_CLOSE_BIT] == 0)
 					{
+						trace("客户端断开");
 						::closesocket(*sockArray[i]);
 						*sockArray[i] = NULL;
 						for (int j = i; j < nEventTotal - 1; j++)

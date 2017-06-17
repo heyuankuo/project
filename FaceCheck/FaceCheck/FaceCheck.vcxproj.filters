@@ -21,9 +21,21 @@
     <ClCompile Include="Accepter.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="Network.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="SockStack.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Accepter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Network.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="SockStack.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

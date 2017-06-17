@@ -4,6 +4,7 @@
 #include <process.h>
 #include "winsock2.h"
 #include "Accepter.h"
+#include "SockStack.h"
 #pragma comment(lib, "ws2_32.lib")
 
 using std::cout;
@@ -13,33 +14,64 @@ void trace(char *s)
 	cout << s << endl;
 }
 
-void facecheck_recv(void *pclient)
+/**
+ * 
+ */
+unsigned  __stdcall recv_client(void *accp)
 {
-	CAccepter *client = reinterpret_cast<CAccepter *>(pclient);
-	int err = 0;
+	CAccepter *paccp = (CAccepter *)accp;
+	Sleep(2000);
 	while (1)
 	{
-		memset(client->m_buffer_recv, 0, sizeof client->m_buffer_recv);
-		err = recv(client->m_sock, client->m_buffer_recv, sizeof client->m_buffer_recv, NULL);
-		if (SOCKET_ERROR == err)
+		int nIndex = ::WSAWaitForMultipleEvents(1, paccp->m_pevent, TRUE, WSA_INFINITE, FALSE);
+		if (nIndex == WSA_WAIT_FAILED)
 		{
-			err = GetLastError();
-			if (10035 == err)
+			// 异常消息处理
+			trace("客户连接异常");
+		}
+
+		// 提取事件
+		WSANETWORKEVENTS event = { 0 };
+		::WSAEnumNetworkEvents(*(paccp->m_psock), *(paccp->m_pevent), &event);
+
+		if (event.lNetworkEvents & FD_READ )		// 读 事件
+		{
+			if (event.iErrorCode[FD_READ_BIT] == 0)
 			{
-				Sleep(1000);
-				continue;
+				memset(paccp->m_buffer_recv, 0, sizeof paccp->m_buffer_recv);
+				int err = recv(*(paccp->m_psock), paccp->m_buffer_recv, sizeof paccp->m_buffer_recv, NULL);
+				if (SOCKET_ERROR == err)
+				{
+					err = GetLastError();
+					if (10035 == err)
+					{
+						Sleep(1000);
+						continue;
+					}
+				}
+				else if (err > 0)
+				{
+					trace(paccp->m_buffer_recv);
+				}
 			}
 		}
-		else if (err > 0)
+		else if (event.lNetworkEvents & FD_CLOSE)		// 关闭 事件
 		{
-			trace(client->m_buffer_recv);
+			if (0 == event.iErrorCode[FD_CLOSE_BIT] || 
+				10053 == event.iErrorCode[FD_CLOSE_BIT] )
+			{
+				return 0;
+			}
 		}
+
 		continue;
 	}
 
+	return 0;
+
 }
 
-void facecheck_send(void *pclient)
+void send_client(void *pclient)
 {
 
 	while (1)
@@ -47,6 +79,43 @@ void facecheck_send(void *pclient)
 
 	}
 }
+
+/**
+ * 客户连接管理
+ */
+void MangerClient(void *pclient)
+{
+	CSockStack *client = (CSockStack *)pclient;
+
+	// 创建客户
+	SOCKET sock_client = accept(client->m_sock_server, NULL, NULL);
+	WSAEVENT event_client = ::WSACreateEvent();
+	::WSAEventSelect(sock_client, event_client, FD_CLOSE | FD_READ);
+	client->AddRecord(sock_client, event_client);		// 添加到表中
+
+	CAccepter accp;
+	accp.m_psock = &sock_client;
+	accp.m_pevent = &event_client;
+
+	// 启动读写线程
+	HANDLE h_recv = (HANDLE)_beginthreadex(NULL, NULL, recv_client, (void *)&accp, NULL, NULL);
+	// _beginthread(	client_send, NULL, (void *)pclient);
+
+	::WaitForMultipleObjects(1, &h_recv, TRUE, INFINITE);
+	CloseHandle(h_recv);
+
+	// 连接中断，回收资源
+	closesocket(sock_client);
+	for (unsigned i = 0; i < client->m_uindex; ++i)
+	{
+		if (client->m_socks[i] == sock_client)
+		{
+			client->DeleteRecord(i);
+			break;
+		}
+	}
+}
+
 int main( int argc, char *argv[])
 {
 	// 套接字初始化
@@ -56,10 +125,6 @@ int main( int argc, char *argv[])
 		trace("WSAStartup failed!");
 		return 1;
 	}
-
-	WSAEVENT    eventArray[WSA_MAXIMUM_WAIT_EVENTS] = {0};
-	SOCKET      *sockArray[WSA_MAXIMUM_WAIT_EVENTS] = {0};
-	int nEventTotal = 0;
 
 	// 创建套接字
 	SOCKET sock_server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -97,8 +162,8 @@ int main( int argc, char *argv[])
 	}
 
 	// 指定工作方式
-	WSAEVENT event = ::WSACreateEvent();
-	err = WSAEventSelect(sock_server, event, FD_ACCEPT | FD_CLOSE);
+	WSAEVENT event_server = ::WSACreateEvent();
+	err = WSAEventSelect(sock_server, event_server, FD_ACCEPT | FD_CLOSE);
 	if (SOCKET_ERROR == err)
 	{
 		trace("异步配置失败");
@@ -107,99 +172,40 @@ int main( int argc, char *argv[])
 		return -1;
 	}
 
-	// 添加到表中  
-	eventArray[nEventTotal] = event;
-	sockArray[nEventTotal] = &sock_server;
-	nEventTotal++;
+	CSockStack clients; // 创建套接字管理栈
+	clients.m_sock_server = sock_server;
 
-	//接受客户端请求  
-	std::vector<CAccepter> vclients(5);	// 指定客户向量
-	CAccepter *pclient = &vclients[0];
+	// 启动服务循环
 	while (1)
 	{
-		// 判断是否有空闲连接
-		if (NULL == pclient)
+		// 等待服务器套接字事件
+		int nIndex = ::WSAWaitForMultipleEvents( 1, &event_server, TRUE, WSA_INFINITE, FALSE);
+		if (nIndex == WSA_WAIT_FAILED )
 		{
-			trace("连接已满");
+			// 异常消息处理
 			continue;
 		}
 
-		// 分配连接
-		int nIndex = ::WSAWaitForMultipleEvents(nEventTotal, eventArray, FALSE, WSA_INFINITE, FALSE);
-		nIndex = nIndex - WSA_WAIT_EVENT_0;
+		// 提取事件
+		WSANETWORKEVENTS event;
+		::WSAEnumNetworkEvents(sock_server, event_server, &event);
 
-		for (int i = nIndex; i < nEventTotal; ++i)
+		if (event.lNetworkEvents & FD_ACCEPT)		// accept 事件
 		{
-			int ret;
-			ret = ::WSAWaitForMultipleEvents(1, &eventArray[i], TRUE, 1000, FALSE);
-			if (ret == WSA_WAIT_FAILED || ret == WSA_WAIT_TIMEOUT)
+			if (event.iErrorCode[FD_ACCEPT_BIT] == 0)
 			{
-				continue;
-			}
-			else
-			{
-				// 获取到来的通知消息，WSAEnumNetworkEvents函数会自动重置受信事件  
-				WSANETWORKEVENTS event;
-				::WSAEnumNetworkEvents(*sockArray[i], eventArray[i], &event);
-				if (event.lNetworkEvents & FD_ACCEPT)                // 处理FD_ACCEPT通知消息  
+				if (clients.m_uindex > WSA_MAXIMUM_WAIT_EVENTS - 1)
 				{
-					if (event.iErrorCode[FD_ACCEPT_BIT] == 0)
-					{
-						if (nEventTotal > WSA_MAXIMUM_WAIT_EVENTS)
-						{
-							trace("太多连接!");
-							continue;
-						}
-						trace("客户端连接");
-						pclient->m_sock = accept(sock_server, (sockaddr FAR*)&(pclient->m_addr), NULL);
-						WSAEVENT event = ::WSACreateEvent();
-						::WSAEventSelect(pclient->m_sock, event, FD_CLOSE | FD_WRITE);
-						// 添加到表中  
-						eventArray[nEventTotal] = event;
-						sockArray[nEventTotal] = &pclient->m_sock;
-						nEventTotal++;
-						pclient = NULL;
+					trace("太多连接!");
+					continue;
+				}
 
-						// 启动读写线程
-						_beginthread(	facecheck_recv, NULL, (void *)pclient);
-						// _beginthread(	facecheck_send, NULL, (void *)pclient);
-					}
-				}
-				else if (event.lNetworkEvents & FD_CLOSE)        // 处理FD_CLOSE通知消息  
-				{
-					if (event.iErrorCode[FD_CLOSE_BIT] == 0)
-					{
-						trace("客户端断开");
-						::closesocket(*sockArray[i]);
-						*sockArray[i] = NULL;
-						for (int j = i; j < nEventTotal - 1; j++)
-						{
-							sockArray[j] = sockArray[j + 1];
-							sockArray[j] = sockArray[j + 1];
-						}
-						nEventTotal--;
-					}
-				}
+				// 创建客户管理线程
+				_beginthread(MangerClient, NULL, (void *)&clients);
 			}
-				
-		}
-		
-		// 查询空闲的连接
-		if (NULL == pclient)
-		{
-			for (int i = 0; i < 5; ++i)
-			{
-				if (NULL == vclients[i].m_sock)
-				{
-					pclient = &vclients[i];
-					break;
-				}
-			}
-
 		}
 		
 	}
 
-	// 
 	return 0;
 }

@@ -149,9 +149,13 @@
   <ItemGroup>
     <ClCompile Include="Accepter.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Network.cpp" />
+    <ClCompile Include="SockStack.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Accepter.h" />
+    <ClInclude Include="Network.h" />
+    <ClInclude Include="SockStack.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

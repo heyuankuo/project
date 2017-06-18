@@ -39,6 +39,7 @@ unsigned _stdcall send_proc(void *accp)
 			}
 		}
 	}
+	
 }
 
 int main( int argc, char *argv[])

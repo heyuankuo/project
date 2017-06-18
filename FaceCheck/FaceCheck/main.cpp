@@ -19,6 +19,7 @@ void trace(char *s)
  */
 unsigned  __stdcall recv_client(void *accp)
 {
+	CoInitialize(NULL);
 	CAccepter *paccp = (CAccepter *)accp;
 	Sleep(2000);
 	while (1)
@@ -60,6 +61,7 @@ unsigned  __stdcall recv_client(void *accp)
 			if (0 == event.iErrorCode[FD_CLOSE_BIT] || 
 				10053 == event.iErrorCode[FD_CLOSE_BIT] )
 			{
+				CoUninitialize();
 				return 0;
 			}
 		}
@@ -67,6 +69,7 @@ unsigned  __stdcall recv_client(void *accp)
 		continue;
 	}
 
+	CoUninitialize();
 	return 0;
 
 }

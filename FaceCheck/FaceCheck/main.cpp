@@ -5,6 +5,7 @@
 #include "winsock2.h"
 #include "Accepter.h"
 #include "SockStack.h"
+#include "FaceMessage.h"
 #pragma comment(lib, "ws2_32.lib")
 
 using std::cout;
@@ -15,11 +16,41 @@ void trace(char *s)
 }
 
 /**
+ * 接收控制
+ * 定长接收，避免沾包
+ */
+int SafeRecv( SOCKET sock, char *buffer, unsigned sum  )
+{
+	int recvsum = 0;
+	while ( 1 )
+	{
+		int err = recv(sock, buffer + recvsum, sum, 0);
+		if (SOCKET_ERROR == err)
+		{
+			err = GetLastError();
+			if (10035 == err)
+			{
+				return 0;
+			}
+			else
+			{
+				return -1;
+			}
+		}
+		else if (err > 0)
+		{
+			// trace(buffer + recvsum);
+			recvsum += err;			
+			continue;
+		}
+	}
+}
+
+/**
  * 
  */
 unsigned  __stdcall recv_client(void *accp)
 {
-	CoInitialize(NULL);
 	CAccepter *paccp = (CAccepter *)accp;
 	Sleep(2000);
 	while (1)
@@ -39,21 +70,17 @@ unsigned  __stdcall recv_client(void *accp)
 		{
 			if (event.iErrorCode[FD_READ_BIT] == 0)
 			{
-				memset(paccp->m_buffer_recv, 0, sizeof paccp->m_buffer_recv);
-				int err = recv(*(paccp->m_psock), paccp->m_buffer_recv, sizeof paccp->m_buffer_recv, NULL);
-				if (SOCKET_ERROR == err)
-				{
-					err = GetLastError();
-					if (10035 == err)
-					{
-						Sleep(1000);
-						continue;
-					}
-				}
-				else if (err > 0)
-				{
-					trace(paccp->m_buffer_recv);
-				}
+				CFaceMessage facemsg;
+				memset( facemsg.message_all, 0, sizeof facemsg.message_all);
+				SafeRecv(*(paccp->m_psock), facemsg.message_all, 1024);
+
+				// 解析
+				facemsg.GetMsgHead();
+				facemsg.ParseClientXml();
+			}
+			else
+			{
+				trace("接受异常");
 			}
 		}
 		else if (event.lNetworkEvents & FD_CLOSE)		// 关闭 事件
@@ -61,6 +88,7 @@ unsigned  __stdcall recv_client(void *accp)
 			if (0 == event.iErrorCode[FD_CLOSE_BIT] || 
 				10053 == event.iErrorCode[FD_CLOSE_BIT] )
 			{
+				trace("客户端断开连接");
 				CoUninitialize();
 				return 0;
 			}
@@ -69,7 +97,6 @@ unsigned  __stdcall recv_client(void *accp)
 		continue;
 	}
 
-	CoUninitialize();
 	return 0;
 
 }
@@ -204,6 +231,7 @@ int main( int argc, char *argv[])
 				}
 
 				// 创建客户管理线程
+				trace("客户端建立连接");
 				_beginthread(MangerClient, NULL, (void *)&clients);
 			}
 		}

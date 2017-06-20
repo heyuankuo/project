@@ -1,0 +1,50 @@
+import "oaidl.idl";
+import "ocidl.idl";
+
+import "unknwn.idl" ; 
+
+typedef struct 
+{
+	char _name[16] ;	//姓名
+	char  _gender[8];	// 性别
+	int _id;		// 用户编号
+} UserInfo ;
+
+// Interface IFaceDBOS
+[
+	object,
+	uuid(32bb8325-b41b-11cf-a6bb-0080c7b2d682),
+	helpstring("IFaceDBOS Interface"),
+	pointer_default(unique)
+]
+interface IFaceDBOS : IUnknown
+{
+	/**
+	 * 查询人脸数据
+	 */
+	HRESULT QueryFace([in] UserInfo *user, [in] BYTE *data ) ;
+} ;
+
+//
+// Component descriptions
+//
+[
+	uuid(d3011ee0-b997-11cf-a6bb-0080c7b2d682),
+	version(1.0),
+	helpstring("Component1.0 Type Library")
+]
+library ServerLib
+{
+	importlib("stdole32.tlb") ;
+
+	[
+		uuid(0c092c2b-882c-11cf-a6bb-0080c7b2d682),
+		helpstring("Component 1 Class")
+	]
+	coclass HykSqliteSys
+	{
+		[default] interface IFaceDBOS ;
+	} ;
+} ;
+
+  
